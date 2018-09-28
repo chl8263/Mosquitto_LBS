@@ -262,7 +262,7 @@ static int _sub_add(struct mosquitto_db *db, struct mosquitto *context, int qos,
 			last_leaf = NULL;
 
 			while(leaf){
-				printf("leaf is not null\n");
+				printf("leaf is not null======\n");
 				if(leaf->context && leaf->context->id && !strcmp(leaf->context->id, context->id)){
 					/* Client making a second subscription to same topic. Only
 					 * need to update QoS. Return -1 to indicate this to the
@@ -308,13 +308,22 @@ static int _sub_add(struct mosquitto_db *db, struct mosquitto *context, int qos,
 				subhier->subs = leaf;
 				leaf->prev = NULL;
 			}
+			
 #ifdef WITH_SYS_TREE
 			db->subscription_count++;
 #endif
 		}
-		printf()
+		printf("sub_add end !!! \n");
+		printf("$$$$$$$$$$  %s\n",subhier->topic);
+
+		if (subhier->subs != NULL) {
+			printf("that id is --> %s\n", subhier->subs->context->id);
+		}
+
+		
 		return MOSQ_ERR_SUCCESS;
 	}
+	printf("token is not null=====\n");
 
 	branch = subhier->children;
 	while(branch){		//다음 token->topic 들을 전부 달아준다.
@@ -340,7 +349,7 @@ static int _sub_add(struct mosquitto_db *db, struct mosquitto *context, int qos,
 	}
 	//printf("%s ????\n",branch->parent->topic);
 	
-	printf("%s ????\n", tokens->topic);
+	printf("**%s**\n", tokens->topic);
 
 
 	return _sub_add(db, context, qos, branch, tokens->next);

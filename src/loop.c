@@ -173,7 +173,7 @@ int mosquitto_main_loop(struct mosquitto_db *db, mosq_sock_t *listensock, int li
 
 			printf("hashiter in\n");
 			context->pollfd_index = -1;
-
+			
 			if(context->sock != INVALID_SOCKET){
 #ifdef WITH_BRIDGE
 				if(context->bridge){

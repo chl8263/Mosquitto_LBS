@@ -39,6 +39,19 @@ Contributors:
 extern unsigned int g_connection_count;
 #endif
 
+typedef struct init_context INITCONTEXT;
+struct init_context
+{
+	struct mosquitto *context;
+	struct init_context *next;
+};
+
+INITCONTEXT *head = NULL;
+
+void insert_init_context(INITCONTEXT **head, INITCONTEXT *p, INITCONTEXT *newnode);
+INITCONTEXT *create_init_context(struct mosquitto *context);
+void display(INITCONTEXT *head);
+
 static char *client_id_gen(struct mosquitto_db *db)
 {
 	char *client_id;
@@ -76,6 +89,7 @@ static char *client_id_gen(struct mosquitto_db *db)
 
 int mqtt3_handle_connect(struct mosquitto_db *db, struct mosquitto *context)
 {
+	
 	char *protocol_name = NULL;
 	uint8_t protocol_version;
 	uint8_t connect_flags;
@@ -581,8 +595,16 @@ int mqtt3_handle_connect(struct mosquitto_db *db, struct mosquitto *context)
 	}
 #endif
 	context->state = mosq_cs_connected;
-	return _mosquitto_send_connack(context, connect_ack, CONNACK_ACCEPTED);
 
+	printf("@@@@@@@@@@@@@@\n");
+	insert_init_context(&head, NULL, create_init_context(context));
+
+	printf("연결되고 나서의 리스트 목록 \n");
+	//display(head);
+	printf("============================\n");
+
+	return _mosquitto_send_connack(context, connect_ack, CONNACK_ACCEPTED);
+	
 handle_connect_error:
 	if(client_id) _mosquitto_free(client_id);
 	if(username) _mosquitto_free(username);
@@ -594,14 +616,98 @@ handle_connect_error:
 	if(client_cert) X509_free(client_cert);
 #endif
 	/* We return an error here which means the client is freed later on. */
+
+	///여기에 connect 조지면 될듯 
+
+	
+	
 	return rc;
 }
 
+INITCONTEXT *getINITCONTEXT() {
+	return head;
+}
+
+void make_init_context(INITCONTEXT head) {
+	
+}
+
+void display(INITCONTEXT *head) {
+	INITCONTEXT *p = head;
+	
+	while (p !=NULL)
+	{
+		if(p->context->id != NULL)
+			printf("connect client id7 is -----> %s \n"  , p->context->id);
+		
+		p = p->next;
+	}
+}
+
+
+INITCONTEXT *create_init_context(struct mosquitto *context) {
+	INITCONTEXT *new_node;
+	new_node = (INITCONTEXT *)malloc(sizeof(INITCONTEXT));
+	
+	if (new_node == NULL) return 1;
+
+	new_node->context = context;
+	new_node->next = NULL;
+
+	return new_node;
+}
+
+void insert_init_context(INITCONTEXT **head, INITCONTEXT *p , INITCONTEXT *newnode) {
+	
+	
+	if (*head == NULL) {
+		printf("init_context_ is null !!!  \n");
+		
+		newnode->next = NULL;
+		*head = newnode;
+	}
+	else if (p == NULL) {
+		printf("p==NULL\n");
+		newnode->next = *head;
+		*head = newnode;
+	}
+	else {
+		printf("else");
+		newnode->next = p->next;
+		p->next = newnode;
+	}
+}
+
+
+
 int mqtt3_handle_disconnect(struct mosquitto_db *db, struct mosquitto *context)
 {
+
+
 	if(!context){
 		return MOSQ_ERR_INVAL;
+
 	}
+
+	INITCONTEXT *q = getINITCONTEXT;
+	INITCONTEXT *p = q;
+
+	while (p != NULL)
+	{
+		if (strcmp(p->context->id, context->id) == 0) {
+			p->next = q->next;
+			remove(q);
+			printf("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%\n");
+			printf("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%\n");
+			printf("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%\n");
+			printf("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%\n");
+			break;
+		}
+
+		p = p->next;
+	}
+
+	
 	if(context->in_packet.remaining_length != 0){
 		return MOSQ_ERR_PROTOCOL;
 	}
@@ -790,7 +896,7 @@ int mqtt3_handle_unsubscribe(struct mosquitto_db *db, struct mosquitto *context)
 				_mosquitto_free(sub);
 				return 1;
 			}
-			if(mosquitto_sub_topic_check(sub)){		// topic check
+			if(mosquitto_sub_topic_check(sub)){		
 				_mosquitto_log_printf(NULL, MOSQ_LOG_INFO, "Invalid unsubscription string from %s, disconnecting.",
 					context->id);
 				_mosquitto_free(sub);

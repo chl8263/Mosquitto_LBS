@@ -31,9 +31,25 @@ Contributors:
 extern uint64_t g_pub_bytes_received;
 #endif
 
+typedef struct init_context INITCONTEXT;
+struct init_context
+{
+	struct mosquitto *context;
+	struct init_context *next;
+};
+
 int mqtt3_packet_handle(struct mosquitto_db *db, struct mosquitto *context)
 {
 	if(!context) return MOSQ_ERR_INVAL;
+	//printf("payload --> %s \n", (context->in_packet.payload)& 0xF0);
+	//printf("remaining_mult --> %ld \n", context->in_packet.remaining_mult);
+	printf("remaining_length --> %ld \n", context->in_packet.remaining_length);
+	//printf("packet_length --> %ld \n", context->in_packet.packet_length);
+	//printf("to_process --> %ld \n", context->in_packet.to_process);
+	printf("pos --> %ld \n", context->in_packet.pos);
+	//printf("mid --> %hd \n", context->in_packet.mid);
+	//printf("command --> %d \n", (context->in_packet.command) & 0xF0);
+	//printf("remaining_count --> %s \n", context->in_packet.remaining_count);
 
 	switch((context->in_packet.command)&0xF0){
 		case PINGREQ:
@@ -46,13 +62,18 @@ int mqtt3_packet_handle(struct mosquitto_db *db, struct mosquitto *context)
 		case PUBCOMP:
 			return _mosquitto_handle_pubackcomp(db, context, "PUBCOMP");
 		case PUBLISH:
+			printf("~~~~~~~~~~~~~~~~~~~~~~~~\n");
 			printf("mqtt3_packet_handle PUBLISH\n");
 			return mqtt3_handle_publish(db, context);		// publish	-> 내부적으로 subscribe 를 찾아서 메세지를 달아줌 ★★★★★★★★★★★★★★★★★★★★★★★
+		/*case INFOLBS:
+			printf("INFOLBS!!!!!!!!!!!!!!!!!!!\n");
+			return mqtt3_handle_publish(db, context);*/
 		case PUBREC:
 			return _mosquitto_handle_pubrec(context);
 		case PUBREL:
 			return _mosquitto_handle_pubrel(db, context);
 		case CONNECT:
+			printf("connect !!!\n");
 			return mqtt3_handle_connect(db, context);
 		case DISCONNECT:
 			return mqtt3_handle_disconnect(db, context);
@@ -74,8 +95,21 @@ int mqtt3_packet_handle(struct mosquitto_db *db, struct mosquitto *context)
 	}
 }
 
+
+
 int mqtt3_handle_publish(struct mosquitto_db *db, struct mosquitto *context)
 {
+	
+	struct mosquitto *temp_context = NULL;
+	static int qoqo = 0;
+	char *catch_message = NULL;
+	char *catch_message_b = NULL;
+	char *catch_message_a = NULL;
+	char *catch_id = NULL;
+	char *catch_local_b_one = NULL;
+	char *catch_local_b_two = NULL;
+	char *catch_local_a_one = NULL;
+	char *catch_local_a_two = NULL;
 	char *topic;
 	void *payload = NULL;
 	uint32_t payloadlen;
@@ -87,6 +121,11 @@ int mqtt3_handle_publish(struct mosquitto_db *db, struct mosquitto *context)
 	struct mosquitto_msg_store *stored = NULL;
 	int len;
 	char *topic_mount;
+	printf("~~~~~~~~~~~~~~~~~~~~~~~~\n");
+
+	INITCONTEXT *head = getINITCONTEXT();
+	INITCONTEXT *printhead = getINITCONTEXT();
+
 #ifdef WITH_BRIDGE
 	char *topic_temp;
 	int i;
@@ -97,12 +136,24 @@ int mqtt3_handle_publish(struct mosquitto_db *db, struct mosquitto *context)
 	dup = (header & 0x08)>>3;
 	qos = (header & 0x06)>>1;
 	if(qos == 3){				// 현재 qos 3 이면 안됨
-		_mosquitto_log_printf(NULL, MOSQ_LOG_INFO,
+		/*_mosquitto_log_printf(NULL, MOSQ_LOG_INFO,
 				"Invalid QoS in PUBLISH from %s, disconnecting.", context->id);
 		return 1;
+		*/
+		/*printf("==========   qos 3 ==========\n");
+		printf("qos --> %d \n", qos);
+		printf("payload ----> %s \n",context->in_packet.payload);
+		printf("==============================\n");*/
 	}
 	retain = (header & 0x01);	// 메세지를 유지하도록 설정되어있는지 를 알아냄	메세지 헤더의 첫번재 비트에서 얻는다.
 	
+	printf("dup --> %d \n " ,dup);
+	printf("qos --> %d \n", qos);
+	printf("retain --> %d \n", retain);
+	
+
+	
+
 	if(_mosquitto_read_string(&context->in_packet, &topic)) return 1;	//	topic 을 context 에 담는 곳
 	if(STREMPTY(topic)){
 		/* Invalid publish topic, disconnect client. */
@@ -157,12 +208,13 @@ int mqtt3_handle_publish(struct mosquitto_db *db, struct mosquitto *context)
 		}
 	}
 #endif
-	if(mosquitto_pub_topic_check(topic) != MOSQ_ERR_SUCCESS){
+	if(mosquitto_pub_topic_check(topic) != MOSQ_ERR_SUCCESS){	// topic check
 		/* Invalid publish topic, just swallow it. */
 		_mosquitto_free(topic);
 		return 1;
 	}
-
+	
+	
 	if(qos > 0){
 		if(_mosquitto_read_uint16(&context->in_packet, &mid)){
 			_mosquitto_free(topic);
@@ -171,6 +223,9 @@ int mqtt3_handle_publish(struct mosquitto_db *db, struct mosquitto *context)
 	}
 
 	payloadlen = context->in_packet.remaining_length - context->in_packet.pos;
+	printf("variable_length --> %ld \n", context->in_packet.pos);
+	printf("payload_length --> %ld \n", payloadlen);
+
 #ifdef WITH_SYS_TREE
 	g_pub_bytes_received += payloadlen;
 #endif
@@ -188,6 +243,7 @@ int mqtt3_handle_publish(struct mosquitto_db *db, struct mosquitto *context)
 		_mosquitto_free(topic);
 		topic = topic_mount;
 	}
+
 
 	if(payloadlen){
 		if(db->config->message_size_limit && payloadlen > db->config->message_size_limit){
@@ -221,20 +277,364 @@ int mqtt3_handle_publish(struct mosquitto_db *db, struct mosquitto *context)
 	if(qos > 0){
 		mqtt3_db_message_store_find(context, mid, &stored);
 	}
-	if(!stored){
+
+	
+	if (!stored) {
 		dup = 0;
-		if(mqtt3_db_message_store(db, context->id, mid, topic, qos, payloadlen, payload, retain, &stored, 0)){
+		if (mqtt3_db_message_store(db, context->id, mid, topic, qos, payloadlen, payload, retain, &stored, 0)) {
 			_mosquitto_free(topic);
-			if(payload) _mosquitto_free(payload);
+			if (payload) _mosquitto_free(payload);
 			return 1;
 		}
-	}else{
+	}
+	else {
 		dup = 1;
 	}
+	/*if (strcmp(topic, "change") != 0) {
+		printf("topic is not !! change\n");
+
+		if (!stored) {
+			dup = 0;
+			if (mqtt3_db_message_store(db, context->id, mid, topic, qos, payloadlen, payload, retain, &stored, 0)) {
+				_mosquitto_free(topic);
+				if (payload) _mosquitto_free(payload);
+				return 1;
+			}
+		}
+		else {
+			dup = 1;
+		}
+	}
+	else {
+		printf("topic is change \n");
+	}*/
+
+	
+
+
+	/*printf("zzzzzzzzzzzzzzzzzzzzzzz\n");
+	printf("zzzz   %s\n", db->subs.children->children->children->topic);	//트리의 첫번재 부분만 조짐 
+	printf("vvvv   %s\n", topic);*/
+
+	/*if (qos == 3) {
+		printf("==========   qos 3 ==========\n");
+		printf("qos --> %d \n", qos);
+		printf("payload ----> %s \n",payload);
+		printf("==============================\n");
+		qoqo++;
+		printf("qoqoqoqoqo ---->>> %d\n", qoqo);
+
+		return rc;
+	}*/
+	
+	if (qos == 3) {
+		
+		printf("==========   qos 3 ==========\n");
+		printf("qos --> %d \n", qos);
+		printf("payload ----> %s \n", payload);
+		printf("==============================\n");
+		qoqo++;
+		printf("qoqoqoqoqo ---->>> %d\n", qoqo);
+
+
+		//printf("");
+		//printf("first topic tree  ---->  %s\n", db->subs.children->children->children->topic);
+		//printf("topic in context id ---> %s\n", db->subs.children->children->children->subs->context->id);
+		//printf("second topic tree  ---->  %s\n", db->subs.children->children->children->next->topic);
+		catch_message = strdup(payload);
+		printf("%s\n",catch_message);
+		char *ptr = strtok(catch_message,"/");
+		catch_id = strdup(ptr);
+		
+		int i = 0;
+		char *sub_ptr = NULL;
+
+		while (ptr != NULL) {
+			ptr = strtok(NULL,"/");
+			if (i == 0) {
+				catch_message_b = strdup(ptr);
+				printf("%s\n", catch_message_b);
+				/*sub_ptr = strtok(catch_message_b,",");
+				catch_local_b_one = strdup(sub_ptr);
+				sub_ptr = strtok(NULL, ",");
+				catch_local_b_two = strdup(sub_ptr);
+				printf("%s\n", catch_local_b_one);
+				printf("%s\n", catch_local_b_two);*/
+			}
+			else if (i == 1) {
+				catch_message_a = strdup(ptr);
+				printf("%s\n", catch_message_a);
+				/*catch_message_a = strdup(ptr);
+				printf("%s\n", catch_message_a);
+				sub_ptr = strtok(catch_message_a, ",");
+				catch_local_a_one = strdup(sub_ptr);
+				sub_ptr = strtok(NULL, ",");
+				catch_local_a_two = strdup(sub_ptr);
+				printf("%s\n", catch_local_a_one);
+				printf("%s\n", catch_local_a_two);*/
+			}
+			i++;
+		}
+		//////////////////////////////////////////////////
+		sub_ptr = strtok(catch_message_b, ",");
+		catch_local_b_one = strdup(sub_ptr);
+		sub_ptr = strtok(NULL, ",");
+		catch_local_b_two = strdup(sub_ptr);
+		printf("%s\n", catch_local_b_one);
+		printf("%s\n", catch_local_b_two);
+
+		sub_ptr = strtok(catch_message_a, ",");
+		catch_local_a_one = strdup(sub_ptr);
+		sub_ptr = strtok(NULL, ",");
+		catch_local_a_two = strdup(sub_ptr);
+		printf("%s\n", catch_local_a_one);
+		printf("%s\n", catch_local_a_two);
+		//////////////////////////////////////////////////
+
+		
+		
+		/*while (ptr != NULL) {
+			ptr = strtok(NULL, ",");
+			if (i == 0) {
+				catch_local_one = strdup(ptr);
+			}
+			else if(i == 1) {
+				catch_local_two = strdup(ptr);
+			}
+
+			i++;
+		}*/
+		
+		printf("before location gu name ---> %s\n", catch_local_b_one);
+		printf("before location dong name ---> %s\n", catch_local_b_two);
+		
+		printf("after location gu name ---> %s\n", catch_local_a_one);
+		printf("after location dong name ---> %s\n", catch_local_a_two);
+
+		struct _mosquitto_subhier *check_subhier = NULL;
+		struct _mosquitto_subhier *check_subhier2 = NULL;
+		struct _mosquitto_subleaf *check_subleaf = NULL;
+		//check_subhier = db->subs.children->children->children;
+		if (strcmp(catch_local_b_one, "null") == 0 && strcmp(catch_local_b_two, "null") == 0) {	//처음인 경우
+			printf("처음인 경우\n");
+
+			INITCONTEXT *q = head;
+			INITCONTEXT *p = q;
+			
+			while (q != NULL)
+			{
+				
+					//printf("%s %s !!!\n", catch_id, q->context->id);
+				if (strcmp(catch_id, q->context->id) == 0) {
+					printf("찾았다!\n");
+
+					//p->next = q->next;
+					//remove(q);
+
+					printf("====변경후 context 연결리스트===\n");
+					//display(head);
+					printf("================================\n");
+					if (catch_local_a_one != NULL && catch_local_a_two != NULL) {
+						mqtt3_sub_add(db, q->context, catch_local_a_one, 0, &db->subs);
+						mqtt3_sub_add(db, q->context, q->context->id, 0, &db->subs);
+						mqtt3_sub_add(db, q->context, catch_local_a_two, 0, &db->subs);
+					}
+					break;
+				}
+				
+
+				p = q;
+				q = q->next;
+			}
+			
+			//mqtt3_sub_add(db, context, catch_local_a_one, 0, &db->subs);
+			//mqtt3_sub_add(db, context, catch_local_a_two, 0, &db->subs);
+			printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ \n");
+			printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ \n");
+			printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ \n");
+			printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ \n");
+			printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ \n");
+			printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ \n");
+			printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ \n");
+			printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ \n");
+			printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ \n");
+			printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ \n");
+
+		}
+		
+		else if (strcmp(catch_local_b_one, "null") == 0 && strcmp(catch_local_b_two, "null") != 0) {		//구는 그대로 동만 바뀔경우
+			printf("구는 그대로 동만 바뀔경우\n");
+			
+			if (db->subs.children->children->children != NULL) {
+				check_subhier = db->subs.children->children->children;
+			}
+			while (check_subhier != NULL) {
+				if (strcmp(check_subhier->topic, catch_local_b_two) == 0) {
+					printf("동만 바뀔때 찾았다!!!!\n");
+					if (check_subhier->subs != NULL) {
+						check_subleaf = check_subhier->subs;
+						while (check_subleaf != NULL){
+							if (strcmp(check_subleaf->context->id, catch_id) == 0) {
+								printf("동만 바뀔때 컨텍스트 찾았다!!!!\n");
+								temp_context = check_subleaf->context;
+								mqtt3_sub_remove(db, temp_context, catch_local_b_two, &db->subs);
+								mqtt3_sub_add(db, temp_context, catch_local_a_two, 0, &db->subs);
+								break;
+							}
+							check_subleaf = check_subleaf->next;
+						}
+					}
+					break;
+				}
+				check_subhier = check_subhier->next;
+			}
+
+			//mqtt3_sub_remove(db, context, catch_local_b_two, &db->subs);
+			//mqtt3_sub_add(db, context, catch_local_a_two, 0, &db->subs);
+			
+			
+		}
+		else if (strcmp(catch_local_b_one, "null") != 0 && strcmp(catch_local_b_two, "null") != 0) {	//구 , 동 전부 바뀔경우
+			printf("구 , 동 전부 바뀔경우\n");
+			if (db->subs.children->children->children != NULL) {
+				check_subhier = db->subs.children->children->children;
+				check_subhier2 = db->subs.children->children->children;
+			}
+
+			while (check_subhier != NULL) {
+				if (strcmp(check_subhier->topic, catch_local_b_one) == 0) {
+					printf("구 바뀔때 찾았다!!!!\n");
+					if (check_subhier->subs != NULL) {
+						check_subleaf = check_subhier->subs;
+						while (check_subleaf != NULL) {
+							if (strcmp(check_subleaf->context->id, catch_id) == 0) {
+								printf("구 바뀔때 컨텍스트 찾았다!!!!\n");
+								temp_context = check_subleaf->context;
+								mqtt3_sub_remove(db, temp_context, catch_local_b_one, &db->subs);
+								mqtt3_sub_add(db, temp_context, catch_local_a_one, 0, &db->subs);
+								break;
+							}
+							check_subleaf = check_subleaf->next;
+						}
+					}
+					break;
+				}
+				check_subhier = check_subhier->next;
+			}
+			
+			while (check_subhier2 != NULL) {
+				if (strcmp(check_subhier2->topic, catch_local_b_two) == 0) {
+					printf("동만 바뀔때 찾았다!!!!\n");
+					if (check_subhier2->subs != NULL) {
+						check_subleaf = check_subhier2->subs;
+						while (check_subleaf != NULL) {
+							if (strcmp(check_subleaf->context->id, catch_id) == 0) {
+								printf("동만 바뀔때 컨텍스트 찾았다!!!!\n");
+								temp_context = check_subleaf->context;
+								mqtt3_sub_remove(db, temp_context, catch_local_b_two, &db->subs);
+								mqtt3_sub_add(db, temp_context, catch_local_a_two, 0, &db->subs);
+								break;
+							}
+							check_subleaf = check_subleaf->next;
+						}
+					}
+					break;
+				}
+				check_subhier2 = check_subhier2->next;
+			}
+			/*char * temp_topic = check_subhier->topic;
+			while (check_subhier != NULL) {
+				printf("초입부\n");
+				temp_topic = check_subhier->topic;
+				if (strcmp(temp_topic, catch_local_b_one) == 0) {
+					printf("구 바뀔때 찾았다!!!!\n");
+					if (check_subhier->subs != NULL) {
+						check_subleaf = check_subhier->subs;
+						while (check_subleaf != NULL) {
+							if (strcmp(check_subleaf->context->id, catch_id) == 0) {
+								printf("구 바뀔때 컨텍스트 찾았다!!!!\n");
+								temp_context = check_subleaf->context;
+								mqtt3_sub_remove(db, temp_context, catch_local_b_one, &db->subs);
+								mqtt3_sub_add(db, temp_context, catch_local_a_one, 0, &db->subs);
+								break;
+							}
+							check_subleaf = check_subleaf->next;
+						}
+						printf("낄낄낄\n");
+					}
+					
+					printf("깔깔깔\n");
+					temp_topic = NULL;
+					temp_topic = check_subhier->topic;
+				}else if (strcmp(temp_topic, catch_local_b_two) == 0) {
+					printf("동 바뀔때 찾았다!!!!\n");
+					if (check_subhier->subs != NULL) {
+						check_subleaf = check_subhier->subs;
+						while (check_subleaf != NULL) {
+							if (strcmp(check_subleaf->context->id, catch_id) == 0) {
+								printf("동 바뀔때 컨텍스트 찾았다!!!!\n");
+								temp_context = check_subleaf->context;
+								mqtt3_sub_remove(db, temp_context, catch_local_b_two, &db->subs);
+								mqtt3_sub_add(db, temp_context, catch_local_a_two, 0, &db->subs);
+								break;
+							}
+							check_subleaf = check_subleaf->next;
+						}
+					}
+					
+				}
+				printf("여기\n");
+				check_subhier = check_subhier->next;
+				if (check_subhier == NULL) break;
+				printf("요기\n");
+			}*/
+		}
+		
+		//printf("loop check topic                --> %s\n", check_subhier->topic);
+		//printf("loop check topic in context id  --> %s\n", check_subhier->subs->context->id);
+
+		//check_subhier = check_subhier->next;
+		/*while (check_subhier != NULL) {
+
+			if (strcmp(catch_local_b_one, "null") == 0 && strcmp(catch_local_b_two, "null") == 0 ) {	//처음인 경우
+				printf("처음인 경우\n");
+				
+				mqtt3_sub_add(db, context, catch_local_a_one, 0, &db->subs);
+				
+			}
+			else if (strcmp(catch_local_b_one, "null")== 0  && strcmp(catch_local_b_two, "null") !=0) {		//구는 그대로 동만 바뀔경우
+				printf("구는 그대로 동만 바뀔경우\n");
+			}
+			else if (strcmp(catch_local_b_one, "null") != 0 && strcmp(catch_local_b_two, "null") != 0) {	//구 , 동 전부 바뀔경우
+				printf("구 , 동 전부 바뀔경우\n");
+			}
+
+			printf("loop check topic                --> %s\n", check_subhier->topic);
+			printf("loop check topic in context id  --> %s\n",check_subhier->subs->context->id);
+
+			check_subhier = check_subhier->next;
+		}*/
+		
+		
+		
+		/*printf("first topic tree  ---->  %s\n", db->subs.children->children->children->topic);
+		printf("topic in context id ---> %s\n", db->subs.children->children->children->subs->context->id);
+		printf("second topic tree  ---->  %s\n", db->subs.children->children->children->next->topic);*/
+
+		return rc;
+	}
+	
+	//char *ptr = strtok(catch_message,"/");
+	
+	/*while (ptr != NULL) {
+		printf("%s\n", ptr);
+		ptr = strtok(NULL, ",");
+	}*/
+
 	switch(qos){		//qos 별로 db에 저장한다.
 		case 0:
 			if(mqtt3_db_messages_queue(db, context->id, topic, qos, retain, &stored)) rc = 1;		// message 가 게시되는 곳
-			printf("============\n");
+			printf("=======sendsendsendsend=====\n");
 			break;
 		case 1:
 			if(mqtt3_db_messages_queue(db, context->id, topic, qos, retain, &stored)) rc = 1;
